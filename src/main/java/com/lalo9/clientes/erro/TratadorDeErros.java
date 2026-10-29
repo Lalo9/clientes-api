@@ -1,5 +1,4 @@
-package com.lalo9.clientes.cliente.erro;
-
+package com.lalo9.clientes.erro;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
