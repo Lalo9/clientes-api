@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clientes</title>
+<style>
+  :root { --bg: #f5f6f8; --card: #fff; --texto: #1f2933; --borda: #d9dee4; --azul: #1d4ed8; --verde: #15803d; --vermelho: #b91c1c; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #14171c; --card: #1d2129; --texto: #e6e9ee; --borda: #343b46; --azul: #60a5fa; --verde: #4ade80; --vermelho: #f87171; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--texto); }
+  main { max-width: 960px; margin: 0 auto; padding: 24px 16px; }
+  h1 { margin-top: 0; }
+  .card { background: var(--card); border: 1px solid var(--borda); border-radius: 8px; padding: 16px; margin-bottom: 20px; }
+  form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; align-items: end; }
+  label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
+  input { padding: 8px; border: 1px solid var(--borda); border-radius: 6px; background: var(--bg); color: var(--texto); font-size: 15px; }
+  button { padding: 8px 14px; border: 1px solid var(--borda); border-radius: 6px; background: var(--card); color: var(--texto); cursor: pointer; font-size: 14px; }
+  button.principal { background: var(--azul); border-color: var(--azul); color: #fff; }
+  button:disabled { opacity: .6; cursor: wait; }
+  .botoes { display: flex; gap: 8px; }
+  #msg { min-height: 1.4em; margin: 0 0 16px; font-size: 14px; }
+  #msg.ok { color: var(--verde); }
+  #msg.erro { color: var(--vermelho); }
+  .tabela { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--borda); white-space: nowrap; }
+  td.acoes { display: flex; gap: 6px; }
+  .vazio { padding: 16px; text-align: center; opacity: .7; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Cadastro de clientes</h1>
+
+  <section class="card">
+    <form id="form">
+      <input type="hidden" id="campoId">
+      <label>Nome
+        <input id="campoNome" required maxlength="150" autocomplete="off">
+      </label>
+      <label>CNPJ
+        <input id="campoCnpj" required placeholder="00.000.000/0001-91" autocomplete="off">
+      </label>
+      <label>CEP
+        <input id="campoCep" required placeholder="01001-000" autocomplete="off">
+      </label>
+      <div class="botoes">
+        <button type="submit" id="botaoSalvar" class="principal">Cadastrar</button>
+        <button type="button" id="botaoCancelar" hidden>Cancelar</button>
+      </div>
+    </form>
+  </section>
+
+  <p id="msg" role="status"></p>
+
+  <section class="card tabela">
+    <table>
+      <thead>
+        <tr><th>Nome</th><th>CNPJ</th><th>Razão social</th><th>Endereço</th><th>Cidade</th><th></th></tr>
+      </thead>
+      <tbody id="corpo"></tbody>
+    </table>
+  </section>
+</main>
+
+<script>
+const API = '/clientes';
+const form = document.getElementById('form');
+const campoId = document.getElementById('campoId');
+const campoNome = document.getElementById('campoNome');
+const campoCnpj = document.getElementById('campoCnpj');
+const campoCep = document.getElementById('campoCep');
+const botaoSalvar = document.getElementById('botaoSalvar');
+const botaoCancelar = document.getElementById('botaoCancelar');
+const msg = document.getElementById('msg');
+const corpo = document.getElementById('corpo');
+
+function somenteDigitos(valor) {
+  return valor.replace(/\D/g, '');
+}
+
+function formatarCnpj(c) {
+  return c.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+}
+
+function mostrar(texto, erro) {
+  msg.textContent = texto;
+  msg.className = erro ? 'erro' : 'ok';
+}
+
+async function lerErro(resp) {
+  try {
+    const dados = await resp.json();
+    if (dados.erros && dados.erros.length) {
+      return dados.mensagem + ': ' + dados.erros.join('; ');
+    }
+    return dados.mensagem || 'Erro ' + resp.status;
+  } catch {
+    return 'Erro ' + resp.status;
+  }
+}
+
+function limparFormulario() {
+  form.reset();
+  campoId.value = '';
+  botaoSalvar.textContent = 'Cadastrar';
+  botaoCancelar.hidden = true;
+}
+
+function editar(cliente) {
+  campoId.value = cliente.id;
+  campoNome.value = cliente.nome;
+  campoCnpj.value = cliente.cnpj;
+  campoCep.value = cliente.cep;
+  botaoSalvar.textContent = 'Salvar alterações';
+  botaoCancelar.hidden = false;
+  campoNome.focus();
+}
+
+async function excluir(cliente) {
+  if (!confirm('Excluir ' + cliente.nome + '?')) return;
+  try {
+    const resp = await fetch(API + '/' + cliente.id, { method: 'DELETE' });
+    if (!resp.ok) {
+      mostrar(await lerErro(resp), true);
+      return;
+    }
+    mostrar('Cliente excluído.', false);
+    if (campoId.value === String(cliente.id)) limparFormulario();
+    await carregar();
+  } catch {
+    mostrar('Não foi possível falar com a API.', true);
+  }
+}
+
+function criarLinha(cliente) {
+  const tr = document.createElement('tr');
+  const valores = [
+    cliente.nome,
+    formatarCnpj(cliente.cnpj),
+    cliente.razaoSocial || '',
+    [cliente.logradouro, cliente.bairro].filter(Boolean).join(', '),
+    [cliente.cidade, cliente.uf].filter(Boolean).join('/')
+  ];
+  for (const valor of valores) {
+    const td = document.createElement('td');
+    td.textContent = valor;
+    tr.appendChild(td);
+  }
+  const acoes = document.createElement('td');
+  acoes.className = 'acoes';
+  const botaoEditar = document.createElement('button');
+  botaoEditar.textContent = 'Editar';
+  botaoEditar.addEventListener('click', () => editar(cliente));
+  const botaoExcluir = document.createElement('button');
+  botaoExcluir.textContent = 'Excluir';
+  botaoExcluir.addEventListener('click', () => excluir(cliente));
+  acoes.append(botaoEditar, botaoExcluir);
+  tr.appendChild(acoes);
+  return tr;
+}
+
+async function carregar() {
+  try {
+    const resp = await fetch(API);
+    if (!resp.ok) {
+      mostrar(await lerErro(resp), true);
+      return;
+    }
+    const clientes = await resp.json();
+    corpo.replaceChildren();
+    if (clientes.length === 0) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 6;
+      td.className = 'vazio';
+      td.textContent = 'Nenhum cliente cadastrado.';
+      tr.appendChild(td);
+      corpo.appendChild(tr);
+      return;
+    }
+    for (const cliente of clientes) {
+      corpo.appendChild(criarLinha(cliente));
+    }
+  } catch {
+    mostrar('Não foi possível falar com a API.', true);
+  }
+}
+
+form.addEventListener('submit', async (evento) => {
+  evento.preventDefault();
+  const id = campoId.value;
+  const dados = {
+    nome: campoNome.value.trim(),
+    cnpj: somenteDigitos(campoCnpj.value),
+    cep: somenteDigitos(campoCep.value)
+  };
+  botaoSalvar.disabled = true;
+  mostrar('Consultando CNPJ e CEP...', false);
+  try {
+    const resp = await fetch(id ? API + '/' + id : API, {
+      method: id ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(dados)
+    });
+    if (!resp.ok) {
+      mostrar(await lerErro(resp), true);
+      return;
+    }
+    mostrar(id ? 'Cliente atualizado.' : 'Cliente cadastrado.', false);
+    limparFormulario();
+    await carregar();
+  } catch {
+    mostrar('Não foi possível falar com a API.', true);
+  } finally {
+    botaoSalvar.disabled = false;
+  }
+});
+
+botaoCancelar.addEventListener('click', () => {
+  limparFormulario();
+  mostrar('', false);
+});
+
+carregar();
+</script>
+</body>
+</html>
